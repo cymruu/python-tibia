@@ -8,8 +8,19 @@ class TibiaPacket(object):
     def __init__(self):
         self.packet = bytearray()
         self.position = 0
+        self.encryptionPos = 0
+    '''header'''
     def writeHeader(self):
         self.packet = struct.pack('=HI', len(self.packet) + 4, zlib.adler32(self.packet)) + self.packet
+    '''RSA stuff'''
+    def setEncryptionPos(self):
+        self.encryptionPos = len(self.packet)
+    def rsa_encrypt(self, m):
+        m = sum(x*pow(256, i) for i, x in enumerate(reversed(m)))
+        c = pow(m, 65537, OT_RSA)
+        return bytes((c >> i) & 255 for i in reversed(range(0, 1024, 8)))
+    def fillBytes(self):
+        raise NotImplementedError
     '''writters'''
     def writeU8(self, n):
         self.packet+=struct.pack('=B', n)
@@ -18,9 +29,12 @@ class TibiaPacket(object):
     def writeU32(self, n):
         self.packet+=struct.pack('=I', n)
     def writeString(self, s):
+        #TODO: make sure string is bytes
         stringLength = len(s)
-        self.writeU16(len(stringLength))
-        self.packet += struct.pack('%is' % (len(stringLength)))
+        self.writeU16(stringLength)
+        self.packet += struct.pack('%is' % (stringLength), s)
+    def writeBytes(self, b):
+        self.packet+=b
     '''readers'''
     def getU8(self):
         n = self.packet[self.position]
@@ -35,13 +49,22 @@ class TibiaPacket(object):
         self.position+=4
         return n
     def getString(self):
-        raise NotImplementedError
+        stringLength = self.getU16()
+        string = struct.unpack('=%is' % (stringLength), self.packet[self.position:self.position+stringLength])[0]
+        self.position+=stringLength
+        return string
     def getDouble(self, parameter_list):
         raise NotImplementedError
     def printPacket(self):
-        print(self.packet)
+        return self.packet
 
-packet = TibiaPacket()
+acc_name = b'bot1xd'
+acc_password = b'dupa123'
+
+xtea_key = bytes(random.randint(0,255) for i in range(16))
+print('xtea_key', xtea_key)
+
+packet = TibiaPacket() #get charlist packet (login)
 packet.writeU8(1)
 packet.writeU16(2)
 packet.writeU16(1098)
@@ -50,12 +73,19 @@ packet.writeU32(0x4E12DAFF)
 packet.writeU32(0x4E12DB27)
 packet.writeU32(0x4E119CBF)
 packet.writeU8(0)
-packet.printPacket()
-print(packet.getU8())
-print(packet.getU16())
-print(packet.getU16())
-print(packet.getU32())
-print(packet.getU32())
-print(packet.getU32())
-print(packet.getU32())
-print(packet.getU8())
+packet.setEncryptionPos()
+packet.writeU8(0) #0 first RSA byte must be 0
+packet.writeBytes(xtea_key) #we're writing XTEA key, ist just a set of bytes so we i have to use dedicated function
+packet.writeString(acc_name)
+packet.writeString(acc_password)
+print(packet.printPacket())
+print(len(packet.printPacket()))
+# print(packet.getU8())
+# print(packet.getU16())
+# print(packet.getU16())
+# print(packet.getU32())
+# print(packet.getU32())
+# print(packet.getU32())
+# print(packet.getU32())
+# print(packet.getU8())
+# print(packet.getString())
