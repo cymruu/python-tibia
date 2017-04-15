@@ -9,11 +9,6 @@ def rsa_encrypt(m):
   m = sum(x*pow(256, i) for i, x in enumerate(reversed(m)))
   c = pow(m, 65537, OT_RSA)
   return bytes((c >> i) & 255 for i in reversed(range(0, 1024, 8)))
-def rsa_encrypt(m):
-  m = sum(x*pow(256, i) for i, x in enumerate(reversed(m)))
-  c = pow(m, 65537, OT_RSA)
-  return bytes((c >> i) & 255 for i in reversed(range(0, 1024, 8)))
-
 def xtea_decrypt_block(block, key):
   v0, v1 = struct.unpack('=2I', block)
   k = struct.unpack('=4I', key)
