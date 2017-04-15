@@ -16,11 +16,11 @@ class TibiaPacket(object):
     def setEncryptionPos(self):
         self.encryptionPos = len(self.packet)
     def rsa_encrypt(self, m):
-        m = sum(x*pow(256, i) for i, x in enumerate(reversed(m)))
+        m = sum(x*pow(256, i) for i, x in enumerate(reversed(self.packet[self.encryptionPos:])))
         c = pow(m, 65537, OT_RSA)
-        return bytes((c >> i) & 255 for i in reversed(range(0, 1024, 8)))
+        self.packet[self.encryptionPos:] = bytearray((c >> i) & 255 for i in reversed(range(0, 1024, 8)))
     def fillBytes(self):
-        raise NotImplementedError
+        self.packet += bytearray(random.randint(0,255) for i in range(len(self.packet)-self.encryptionPos, 128))
     '''writters'''
     def writeU8(self, n):
         self.packet+=struct.pack('=B', n)
@@ -78,14 +78,10 @@ packet.writeU8(0) #0 first RSA byte must be 0
 packet.writeBytes(xtea_key) #we're writing XTEA key, ist just a set of bytes so we i have to use dedicated function
 packet.writeString(acc_name)
 packet.writeString(acc_password)
+packet.fillBytes()
 print(packet.printPacket())
 print(len(packet.printPacket()))
-# print(packet.getU8())
-# print(packet.getU16())
-# print(packet.getU16())
-# print(packet.getU32())
-# print(packet.getU32())
-# print(packet.getU32())
-# print(packet.getU32())
-# print(packet.getU8())
-# print(packet.getString())
+packet.writeHeader()
+print(packet.printPacket())
+print(len(packet.printPacket()))
+print('super test bulwo', len(packet.printPacket()) == 156)
