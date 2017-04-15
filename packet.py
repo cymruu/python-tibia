@@ -1,6 +1,7 @@
 import random
 import struct
 import zlib
+import socket
 
 OT_RSA = 109120132967399429278860960508995541528237502902798129123468757937266291492576446330739696001110603907230888610072655818825358503429057592827629436413108566029093628212635953836686562675849720620786279431090218017681061521755056710823876476444260558147179707119674283982419152118103759076030616683978566631413
 
@@ -15,7 +16,7 @@ class TibiaPacket(object):
     '''RSA stuff'''
     def setEncryptionPos(self):
         self.encryptionPos = len(self.packet)
-    def rsa_encrypt(self, m):
+    def rsa_encrypt(self):
         m = sum(x*pow(256, i) for i, x in enumerate(reversed(self.packet[self.encryptionPos:])))
         c = pow(m, 65537, OT_RSA)
         self.packet[self.encryptionPos:] = bytearray((c >> i) & 255 for i in reversed(range(0, 1024, 8)))
@@ -29,7 +30,8 @@ class TibiaPacket(object):
     def writeU32(self, n):
         self.packet+=struct.pack('=I', n)
     def writeString(self, s):
-        #TODO: make sure string is bytes
+        if type(s) is str:
+            s = bytes(str)
         stringLength = len(s)
         self.writeU16(stringLength)
         self.packet += struct.pack('%is' % (stringLength), s)
@@ -55,7 +57,7 @@ class TibiaPacket(object):
         return string
     def getDouble(self, parameter_list):
         raise NotImplementedError
-    def printPacket(self):
+    def getPacket(self):
         return self.packet
 
 acc_name = b'bot1xd'
@@ -79,9 +81,9 @@ packet.writeBytes(xtea_key) #we're writing XTEA key, ist just a set of bytes so 
 packet.writeString(acc_name)
 packet.writeString(acc_password)
 packet.fillBytes()
-print(packet.printPacket())
-print(len(packet.printPacket()))
+packet.rsa_encrypt()
 packet.writeHeader()
-print(packet.printPacket())
-print(len(packet.printPacket()))
-print('super test bulwo', len(packet.printPacket()) == 156)
+with socket.socket() as s:
+    s.connect(('144.217.149.144', 7171))
+    s.sendall(packet.getPacket())
+    print(s.recv(1024))
