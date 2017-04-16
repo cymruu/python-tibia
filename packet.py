@@ -1,18 +1,37 @@
 import random
+import socket
 import struct
 import zlib
-import socket
 
 OT_RSA = 109120132967399429278860960508995541528237502902798129123468757937266291492576446330739696001110603907230888610072655818825358503429057592827629436413108566029093628212635953836686562675849720620786279431090218017681061521755056710823876476444260558147179707119674283982419152118103759076030616683978566631413
-
+headerSize = 6
 class TibiaPacket(object):
-    def __init__(self):
-        self.packet = bytearray()
+    def __init__(self, packetBytes=bytearray()):
+        self.packet = bytearray(packetBytes)
         self.position = 0
         self.encryptionPos = 0
+    def handleIncoming(self, s):
+        print(s.recv(1024))
     '''header'''
     def writeHeader(self):
         self.packet = struct.pack('=HI', len(self.packet) + 4, zlib.adler32(self.packet)) + self.packet
+    def readHeader(self):
+        packetSize = self.getU16()
+        adler32Checksum = self.getU32()
+        print(packetSize, len(self.packet), adler32Checksum)
+    '''XTEA stuff'''
+    def xtea_decrypt_block(self, block):
+        v0, v1 = struct.unpack('=2I', block)
+        k = struct.unpack('=4I', xtea_key)
+        delta, mask, rounds = 0x9E3779B9, 0xFFFFFFFF, 32
+        sum = (delta * rounds) & mask
+        for round in range(rounds):
+            v1 = (v1 - (((v0 << 4 ^ v0 >> 5) + v0) ^ (sum + k[sum >> 11 & 3]))) & mask
+            sum = (sum - delta) & mask
+            v0 = (v0 - (((v1 << 4 ^ v1 >> 5) + v1) ^ (sum + k[sum & 3]))) & mask
+        return struct.pack('=2I', v0, v1)
+    def xtea_decrypt(self):
+        self.packet[headerSize:] = b''.join(self.xtea_decrypt_block(self.packet[headerSize:][i:i + 8]) for i in range(0, len(self.packet) - headerSize, 8))
     '''RSA stuff'''
     def setEncryptionPos(self):
         self.encryptionPos = len(self.packet)
@@ -20,6 +39,7 @@ class TibiaPacket(object):
         m = sum(x*pow(256, i) for i, x in enumerate(reversed(self.packet[self.encryptionPos:])))
         c = pow(m, 65537, OT_RSA)
         self.packet[self.encryptionPos:] = bytearray((c >> i) & 255 for i in reversed(range(0, 1024, 8)))
+        self.encryptionPos = 0
     def fillBytes(self):
         self.packet += bytearray(random.randint(0,255) for i in range(len(self.packet)-self.encryptionPos, 128))
     '''writters'''
@@ -59,31 +79,44 @@ class TibiaPacket(object):
         raise NotImplementedError
     def getPacket(self):
         return self.packet
-
+def makeLoginPacket(xtea_key, acc_name, acc_password):
+    packet = TibiaPacket() #get charlist packet (login)
+    packet.writeU8(1)
+    packet.writeU16(2)
+    packet.writeU16(1098)
+    packet.writeU32(1098)
+    packet.writeU32(0x4E12DAFF)
+    packet.writeU32(0x4E12DB27)
+    packet.writeU32(0x4E119CBF)
+    packet.writeU8(0)
+    packet.setEncryptionPos()
+    packet.writeU8(0) #0 first RSA byte must be 0
+    packet.writeBytes(xtea_key) #we're writing XTEA key, ist just a set of bytes so we i have to use dedicated function
+    packet.writeString(acc_name)
+    packet.writeString(acc_password)
+    packet.fillBytes()
+    packet.rsa_encrypt()
+    packet.writeHeader()
+    return packet.getPacket()
+def loginPacketHandler(s):
+    packetBytes = s.recv(headerSize)
+    packetSize, adler32Checksum = struct.unpack('=HI', packetBytes)
+    print(packetSize, adler32Checksum)
+    packetBytes += s.recv(packetSize - 2) # U16 size
+    received_packet = TibiaPacket(packetBytes)
+    print(received_packet.getPacket())
+    print(len(received_packet.getPacket()))
+    received_packet.readHeader()
+    received_packet.xtea_decrypt()
+    print('xteadecrypte', received_packet.getPacket())
+    return [1]
 acc_name = b'bot1xd'
 acc_password = b'dupa123'
 
 xtea_key = bytes(random.randint(0,255) for i in range(16))
-print('xtea_key', xtea_key)
-
-packet = TibiaPacket() #get charlist packet (login)
-packet.writeU8(1)
-packet.writeU16(2)
-packet.writeU16(1098)
-packet.writeU32(1098)
-packet.writeU32(0x4E12DAFF)
-packet.writeU32(0x4E12DB27)
-packet.writeU32(0x4E119CBF)
-packet.writeU8(0)
-packet.setEncryptionPos()
-packet.writeU8(0) #0 first RSA byte must be 0
-packet.writeBytes(xtea_key) #we're writing XTEA key, ist just a set of bytes so we i have to use dedicated function
-packet.writeString(acc_name)
-packet.writeString(acc_password)
-packet.fillBytes()
-packet.rsa_encrypt()
-packet.writeHeader()
+# print('xtea_key', xtea_key)
 with socket.socket() as s:
     s.connect(('144.217.149.144', 7171))
-    s.sendall(packet.getPacket())
-    print(s.recv(1024))
+    s.sendall(makeLoginPacket(xtea_key, acc_name, acc_password))
+    for data in loginPacketHandler(s):
+        print(data)
