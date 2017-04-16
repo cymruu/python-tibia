@@ -13,11 +13,12 @@ class TibiaPacket(object):
         self.encryptionPos = 0
     '''header'''
     def writeHeader(self):
-        self.packet = struct.pack('=HI', len(self.packet) + 4, zlib.adler32(self.packet)) + self.packet
+        self.header = struct.pack('=HI', len(self.packet) + 4, zlib.adler32(self.packet)) + self.packet
     def readHeader(self):
-        self.packetSize = self.getU16()
-        self.adler32Checksum = self.getU32()
-        return {'packetSize': self.packetSize, 'checksum': self.adler32Checksum}
+        packetSize, adler32Checksum = struct.unpack('=HI', self.header)
+        self.packetSize = packetSize
+        self.adler32 = adler32Checksum
+        return {'packetSize': packetSize, 'adler32Checksum': adler32Checksum}
     '''XTEA stuff'''
     def xtea_decrypt_block(self, block):
         v0, v1 = struct.unpack('=2I', block)
@@ -80,6 +81,8 @@ class TibiaPacket(object):
         raise NotImplementedError
     def getPacket(self):
         return self.packet
+    def getWholePacket(self):
+        return self.header + self.packet
 def makeLoginPacket(xtea_key, acc_name, acc_password):
     packet = TibiaPacket() #get charlist packet (login)
     packet.writeU8(1)
@@ -98,7 +101,7 @@ def makeLoginPacket(xtea_key, acc_name, acc_password):
     packet.fillBytes()
     packet.rsa_encrypt()
     packet.writeHeader()
-    return packet.getPacket()
+    return packet.getWholePacket()
 def loginPacketHandler(s):
     packetBytes = s.recv(headerSize)
     packetSize, adler32Checksum = struct.unpack('=HI', packetBytes)
