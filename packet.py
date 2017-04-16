@@ -7,11 +7,10 @@ OT_RSA = 10912013296739942927886096050899554152823750290279812912346875793726629
 headerSize = 6
 class TibiaPacket(object):
     def __init__(self, packetBytes=bytearray()):
-        self.packet = bytearray(packetBytes)
+        self.header = packetBytes[:headerSize]
+        self.packet = packetBytes[headerSize:]
         self.position = 0
         self.encryptionPos = 0
-    def handleIncoming(self, s):
-        print(s.recv(1024))
     '''header'''
     def writeHeader(self):
         self.packet = struct.pack('=HI', len(self.packet) + 4, zlib.adler32(self.packet)) + self.packet
@@ -31,8 +30,9 @@ class TibiaPacket(object):
             v0 = (v0 - (((v1 << 4 ^ v1 >> 5) + v1) ^ (sum + k[sum & 3]))) & mask
         return struct.pack('=2I', v0, v1)
     def xtea_decrypt(self):
-        self.packet[headerSize:] = b''.join(self.xtea_decrypt_block(self.packet[headerSize:][i:i + 8]) for i in range(0, len(self.packet) - headerSize, 8))
-        self.packet[headerSize:] = self.packet[headerSize:][2:2+self.packetSize]
+        self.packet = b''.join(self.xtea_decrypt_block(self.packet[i:i + 8]) for i in range(0, len(self.packet), 8))
+    def trim_size(self):
+        self.packet = self.packet[2:2+self.packetSize]
     '''RSA stuff'''
     def setEncryptionPos(self):
         self.encryptionPos = len(self.packet)
@@ -106,9 +106,11 @@ def loginPacketHandler(s):
     received_packet = TibiaPacket(packetBytes)
     print(received_packet.readHeader())
     received_packet.xtea_decrypt()
+    received_packet.trim_size()
     print(received_packet.getPacket())
-    # for index in range(len(received_packet.getPacket()[headerSize:])):
-    while received_packet.position < len(received_packet.getPacket()[headerSize:]):
+    # for index in range(len(received_packet.getPacket())):
+    index =0 
+    while received_packet.position < len(received_packet.getPacket()):
         packetCode = received_packet.getU8()
         if packetCode == 10: #servererror
             yield 'servererror', received_packet.getString()
@@ -117,11 +119,11 @@ def loginPacketHandler(s):
         elif packetCode == 20: #loginservermotd
             yield 'loginservermotd', received_packet.getString()
         elif packetCode == 40: #session key
-            yield 'sessionkey', received_packet.getString()
+            sessionkey = received_packet.getString()
+            yield 'sessionkey', sessionkey
         elif packetCode == 100: #charlist
             worlds = {}
             worldsCount = received_packet.getU8()
-            print('worldsCount', worldsCount)
             for world in range(worldsCount):
                 worldId = received_packet.getU8()
                 worlds[world] = {}
@@ -129,9 +131,8 @@ def loginPacketHandler(s):
                 worlds[worldId]['ip'] = received_packet.getString()
                 worlds[worldId]['port'] = received_packet.getU16()
                 worlds[worldId]['previewState'] = received_packet.getU8()
-            print(worlds)
             charactersCount = received_packet.getU8()
-            characters = {}
+            global characters
             for character in range(charactersCount):
                 worldId = received_packet.getU8()
                 characters[character] = {}
@@ -140,17 +141,38 @@ def loginPacketHandler(s):
                 characters[character]['worldIp'] = worlds[worldId]['ip']
                 characters[character]['worldPort'] = worlds[worldId]['port']
                 characters[character]['previewState'] = worlds[worldId]['previewState']
-            print(characters)
             print('premdays: ', received_packet.getU32() + received_packet.getU32())
+            yield 'characters', characters
         else:
-            yield '%i unknown packport code %d (0x%x)' % (index, packetCode, packetCode), None 
+            yield 'unknown packet', '%i  %d (0x%x)' % (index, packetCode, packetCode)
+def handleGamePackets(c):
+    packetBytes = c.recv(headerSize)
+    packetSize, adler32Checksum = struct.unpack('=HI', packetBytes)
+    print(packetSize, adler32Checksum)
+    packetBytes += c.recv(packetSize - 2) # U16 size
+    received_packet = TibiaPacket(packetBytes)
+    print(received_packet.getPacket())
+    print(received_packet.readHeader())
+    # received_packet.trim_size()
+    # print(received_packet.position, len(received_packet.getPacket()))
+    for i in received_packet.getPacket():
+        received_packet.getU8()
+    yield None, None
 acc_name = b'bot1xd'
 acc_password = b'dupa123'
 
+characters = {}
+sessionkey = None
 xtea_key = bytes(random.randint(0,255) for i in range(16))
 # print('xtea_key', xtea_key)
-with socket.socket() as s:
-    s.connect(('144.217.149.144', 7171))
-    s.sendall(makeLoginPacket(xtea_key, acc_name, acc_password))
-    for data,data2 in loginPacketHandler(s):
-        print(data, data2)
+with socket.socket() as c:
+    c.connect(('144.217.149.144', 7171))
+    c.sendall(makeLoginPacket(xtea_key, acc_name, acc_password))
+    for packet, data in loginPacketHandler(c):
+        print(packet, data)
+# we have everything, lets login
+with socket.socket() as c:# client
+    print(characters, sessionkey)
+    c.connect((characters[0]['worldIp'], characters[0]['worldPort']))
+    for packet, data in handleGamePackets(c):
+        print(packet, data)
