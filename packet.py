@@ -16,9 +16,9 @@ class TibiaPacket(object):
     def writeHeader(self):
         self.packet = struct.pack('=HI', len(self.packet) + 4, zlib.adler32(self.packet)) + self.packet
     def readHeader(self):
-        packetSize = self.getU16()
-        adler32Checksum = self.getU32()
-        print(packetSize, len(self.packet), adler32Checksum)
+        self.packetSize = self.getU16()
+        self.adler32Checksum = self.getU32()
+        return {'packetSize': self.packetSize, 'checksum': self.adler32Checksum}
     '''XTEA stuff'''
     def xtea_decrypt_block(self, block):
         v0, v1 = struct.unpack('=2I', block)
@@ -32,6 +32,7 @@ class TibiaPacket(object):
         return struct.pack('=2I', v0, v1)
     def xtea_decrypt(self):
         self.packet[headerSize:] = b''.join(self.xtea_decrypt_block(self.packet[headerSize:][i:i + 8]) for i in range(0, len(self.packet) - headerSize, 8))
+        self.packet[headerSize:] = self.packet[headerSize:][2:2+self.packetSize]
     '''RSA stuff'''
     def setEncryptionPos(self):
         self.encryptionPos = len(self.packet)
@@ -83,8 +84,8 @@ def makeLoginPacket(xtea_key, acc_name, acc_password):
     packet = TibiaPacket() #get charlist packet (login)
     packet.writeU8(1)
     packet.writeU16(2)
-    packet.writeU16(1098)
-    packet.writeU32(1098)
+    packet.writeU16(1100)
+    packet.writeU32(1100)
     packet.writeU32(0x4E12DAFF)
     packet.writeU32(0x4E12DB27)
     packet.writeU32(0x4E119CBF)
@@ -101,15 +102,20 @@ def makeLoginPacket(xtea_key, acc_name, acc_password):
 def loginPacketHandler(s):
     packetBytes = s.recv(headerSize)
     packetSize, adler32Checksum = struct.unpack('=HI', packetBytes)
-    print(packetSize, adler32Checksum)
     packetBytes += s.recv(packetSize - 2) # U16 size
     received_packet = TibiaPacket(packetBytes)
-    print(received_packet.getPacket())
-    print(len(received_packet.getPacket()))
-    received_packet.readHeader()
+    print(received_packet.readHeader())
     received_packet.xtea_decrypt()
-    print('xteadecrypte', received_packet.getPacket())
-    return [1]
+    print(received_packet.getPacket())
+    packetCode = received_packet.getU8()
+    print('packetCode', packetCode)
+    if packetCode == 10: #servererror
+        yield 'servererror', received_packet.getString()
+    elif packetCode == 11: #loginerror
+        yield 'loginerror', received_packet.getString()
+    elif packetCode == 20: #loginservermotd
+        yield 'loginservermotd', received_packet.getString()
+    yield 'unknown packet code %d (0x%x)' % (packetCode, packetCode), None 
 acc_name = b'bot1xd'
 acc_password = b'dupa123'
 
@@ -118,5 +124,5 @@ xtea_key = bytes(random.randint(0,255) for i in range(16))
 with socket.socket() as s:
     s.connect(('144.217.149.144', 7171))
     s.sendall(makeLoginPacket(xtea_key, acc_name, acc_password))
-    for data in loginPacketHandler(s):
-        print(data)
+    for data,data2 in loginPacketHandler(s):
+        print(data, data2)
