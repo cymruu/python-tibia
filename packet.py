@@ -103,7 +103,6 @@ def makeLoginPacket(xtea_key, acc_name, acc_password):
     packet.writeHeader()
     return packet.getWholePacket()
 def makeEnterGamePacket(sessionkey, charname, timestamp, randomNumber):
-    print(sessionkey, charname, timestamp, randomNumber)
     packet = TibiaPacket()
     packet.writeU8(10)
     packet.writeU16(2)
@@ -128,10 +127,9 @@ def loginPacketHandler(s):
     packetSize, adler32Checksum = struct.unpack('=HI', packetBytes)
     packetBytes += s.recv(packetSize - 2) # U16 size
     received_packet = TibiaPacket(packetBytes)
-    print(received_packet.readHeader())
+    received_packet.readHeader()
     received_packet.xtea_decrypt()
     received_packet.trim_size()
-    print(received_packet.getPacket())
     # for index in range(len(received_packet.getPacket())):
     index =0 
     while received_packet.position < len(received_packet.getPacket()):
@@ -171,30 +169,33 @@ def loginPacketHandler(s):
         else:
             yield 'unknown packet', '%i  %d (0x%x)' % (index, packetCode, packetCode)
 def handleGamePackets(c):
-    packetBytes = c.recv(headerSize)
-    packetSize, adler32Checksum = struct.unpack('=HI', packetBytes)
-    packetBytes += c.recv(packetSize - 2) # U16 size
-    received_packet = TibiaPacket(packetBytes)
-    received_packet.readHeader()
-    print(received_packet.getPacket())
-    received_packet.trim_size()
-    print(received_packet.getPacket())
-    print('pos', received_packet.position)
-    while received_packet.position < len(received_packet.getPacket()):
-        packetCode = received_packet.getU8()
-        if packetCode == 31: #server challenge
-            timestamp = received_packet.getU32()
-            randomNumber = received_packet.getU8()
-            c.sendall(makeEnterGamePacket(sessionkey, characters[0]['name'], timestamp, randomNumber))
-            yield 'serverchallenge', {'timestamp': timestamp, 'randomNumber': randomNumber}
-    yield None, None
+    while True:
+        packetBytes = c.recv(headerSize)
+        packetSize, adler32Checksum = struct.unpack('=HI', packetBytes)
+        packetBytes += c.recv(packetSize - 2) # U16 size
+        received_packet = TibiaPacket(packetBytes)
+        received_packet.readHeader()
+        received_packet.trim_size()
+        while received_packet.position < len(received_packet.getPacket()):
+            packetCode = received_packet.getU8()
+            if packetCode == 31: #server challenge
+                timestamp = received_packet.getU32()
+                randomNumber = received_packet.getU8()
+                c.sendall(makeEnterGamePacket(sessionkey, characters[0]['name'], timestamp, randomNumber))
+                yield 'serverchallenge', {'timestamp': timestamp, 'randomNumber': randomNumber}
+            elif packetCode == 15: #gameinitstatus
+                playerId = received_packet.getU32()
+                serverBeat = received_packet.getU16()
+                yield 'entergame', {'id': playerId, 'serverBeat': serverBeat}
+            else:
+                received_packet.position+=received_packet.packetSize-1#TODO: adjust it
+                yield 'unknown packet', '%i  %d (0x%x)' % (0, packetCode, packetCode)
 acc_name = b'bot1xd'
 acc_password = b'dupa123'
 
 characters = {}
 sessionkey = None
 xtea_key = bytes(random.randint(0,255) for i in range(16))
-# print('xtea_key', xtea_key)
 with socket.socket() as c:
     c.connect(('144.217.149.144', 7171))
     c.sendall(makeLoginPacket(xtea_key, acc_name, acc_password))
@@ -202,7 +203,9 @@ with socket.socket() as c:
         print(packet, data)
 # we have everything, lets login
 with socket.socket() as c:# client
-    print(characters, sessionkey)
     c.connect((characters[0]['worldIp'], characters[0]['worldPort']))
+    i = 0
     for packet, data in handleGamePackets(c):
         print(packet, data)
+        i+=1
+        if(i>100):break
