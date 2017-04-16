@@ -102,6 +102,27 @@ def makeLoginPacket(xtea_key, acc_name, acc_password):
     packet.rsa_encrypt()
     packet.writeHeader()
     return packet.getWholePacket()
+def makeEnterGamePacket(sessionkey, charname, timestamp, randomNumber):
+    print(sessionkey, charname, timestamp, randomNumber)
+    packet = TibiaPacket()
+    packet.writeU8(10)
+    packet.writeU16(2)
+    packet.writeU16(1098)
+    packet.writeU32(1098)
+    packet.writeU16(65)
+    packet.writeU8(0)
+    packet.setEncryptionPos()
+    packet.writeU8(0)
+    packet.writeBytes(xtea_key)
+    packet.writeU8(0)
+    packet.writeString(sessionkey)
+    packet.writeString(charname)
+    packet.writeU32(timestamp)
+    packet.writeU8(randomNumber)
+    packet.fillBytes()
+    packet.rsa_encrypt()
+    packet.writeHeader()
+    return packet.getWholePacket()
 def loginPacketHandler(s):
     packetBytes = s.recv(headerSize)
     packetSize, adler32Checksum = struct.unpack('=HI', packetBytes)
@@ -122,6 +143,7 @@ def loginPacketHandler(s):
         elif packetCode == 20: #loginservermotd
             yield 'loginservermotd', received_packet.getString()
         elif packetCode == 40: #session key
+            global sessionkey
             sessionkey = received_packet.getString()
             yield 'sessionkey', sessionkey
         elif packetCode == 100: #charlist
@@ -151,15 +173,20 @@ def loginPacketHandler(s):
 def handleGamePackets(c):
     packetBytes = c.recv(headerSize)
     packetSize, adler32Checksum = struct.unpack('=HI', packetBytes)
-    print(packetSize, adler32Checksum)
     packetBytes += c.recv(packetSize - 2) # U16 size
     received_packet = TibiaPacket(packetBytes)
+    received_packet.readHeader()
     print(received_packet.getPacket())
-    print(received_packet.readHeader())
-    # received_packet.trim_size()
-    # print(received_packet.position, len(received_packet.getPacket()))
-    for i in received_packet.getPacket():
-        received_packet.getU8()
+    received_packet.trim_size()
+    print(received_packet.getPacket())
+    print('pos', received_packet.position)
+    while received_packet.position < len(received_packet.getPacket()):
+        packetCode = received_packet.getU8()
+        if packetCode == 31: #server challenge
+            timestamp = received_packet.getU32()
+            randomNumber = received_packet.getU8()
+            c.sendall(makeEnterGamePacket(sessionkey, characters[0]['name'], timestamp, randomNumber))
+            yield 'serverchallenge', {'timestamp': timestamp, 'randomNumber': randomNumber}
     yield None, None
 acc_name = b'bot1xd'
 acc_password = b'dupa123'
