@@ -107,15 +107,43 @@ def loginPacketHandler(s):
     print(received_packet.readHeader())
     received_packet.xtea_decrypt()
     print(received_packet.getPacket())
-    packetCode = received_packet.getU8()
-    print('packetCode', packetCode)
-    if packetCode == 10: #servererror
-        yield 'servererror', received_packet.getString()
-    elif packetCode == 11: #loginerror
-        yield 'loginerror', received_packet.getString()
-    elif packetCode == 20: #loginservermotd
-        yield 'loginservermotd', received_packet.getString()
-    yield 'unknown packet code %d (0x%x)' % (packetCode, packetCode), None 
+    # for index in range(len(received_packet.getPacket()[headerSize:])):
+    while received_packet.position < len(received_packet.getPacket()[headerSize:]):
+        packetCode = received_packet.getU8()
+        if packetCode == 10: #servererror
+            yield 'servererror', received_packet.getString()
+        elif packetCode == 11: #loginerror
+            yield 'loginerror', received_packet.getString()
+        elif packetCode == 20: #loginservermotd
+            yield 'loginservermotd', received_packet.getString()
+        elif packetCode == 40: #session key
+            yield 'sessionkey', received_packet.getString()
+        elif packetCode == 100: #charlist
+            worlds = {}
+            worldsCount = received_packet.getU8()
+            print('worldsCount', worldsCount)
+            for world in range(worldsCount):
+                worldId = received_packet.getU8()
+                worlds[world] = {}
+                worlds[worldId]['name'] = received_packet.getString()
+                worlds[worldId]['ip'] = received_packet.getString()
+                worlds[worldId]['port'] = received_packet.getU16()
+                worlds[worldId]['previewState'] = received_packet.getU8()
+            print(worlds)
+            charactersCount = received_packet.getU8()
+            characters = {}
+            for character in range(charactersCount):
+                worldId = received_packet.getU8()
+                characters[character] = {}
+                characters[character]['name'] = received_packet.getString()
+                characters[character]['worldName'] = worlds[worldId]['name']
+                characters[character]['worldIp'] = worlds[worldId]['ip']
+                characters[character]['worldPort'] = worlds[worldId]['port']
+                characters[character]['previewState'] = worlds[worldId]['previewState']
+            print(characters)
+            print('premdays: ', received_packet.getU32() + received_packet.getU32())
+        else:
+            yield '%i unknown packport code %d (0x%x)' % (index, packetCode, packetCode), None 
 acc_name = b'bot1xd'
 acc_password = b'dupa123'
 
